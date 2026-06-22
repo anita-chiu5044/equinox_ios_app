@@ -9,9 +9,16 @@ import SwiftUI
 
 @main
 struct EquinoxApp: App {
+    @StateObject private var appState = AppState()
+
+    init() {
+        FontRegistrar.registerBundledFonts()
+    }
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
+                .environmentObject(appState)
         }
     }
 }
