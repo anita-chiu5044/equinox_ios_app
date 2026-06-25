@@ -1,5 +1,4 @@
 import SwiftUI
-import AuthenticationServices
 
 struct OnboardingWelcomeView: View {
     @EnvironmentObject private var appState: AppState
@@ -63,20 +62,6 @@ struct OnboardingWelcomeView: View {
                 }
 
                 VStack(spacing: 12) {
-                    // Sign in with Apple
-                    SignInWithAppleButton(.continue) { request in
-                        request.requestedScopes = [.fullName, .email]
-                    } onCompletion: { result in
-                        Task {
-                            await appState.handleAppleAuthorization(result)
-                        }
-                    }
-                    .signInWithAppleButtonStyle(.black)
-                    .frame(height: 54)
-                    .clipShape(.rect(cornerRadius: 16))
-                    .shadow(color: Theme.ink.opacity(0.18), radius: 8, x: 0, y: 4)
-                    .accessibilityLabel("Sign in with Apple")
-
                     // Sign in with Google
                     Button {
                         Task {

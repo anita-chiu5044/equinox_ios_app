@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct MainTabView: View {
+    @State private var selectedTab = 0
+
     init() {
         // Tab bar: warm paper background, accent tint for active items
         let appearance = UITabBarAppearance()
@@ -21,26 +23,32 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        TabView {
-            TodayView()
+        TabView(selection: $selectedTab) {
+            TodayView {
+                selectedTab = 1
+            }
                 .tabItem {
                     Label("Today", systemImage: "calendar")
                 }
+                .tag(0)
 
             PlansView()
                 .tabItem {
                     Label("Plans", systemImage: "list.bullet.clipboard")
                 }
+                .tag(1)
 
             InsightsView()
                 .tabItem {
                     Label("Insights", systemImage: "chart.bar")
                 }
+                .tag(2)
 
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
+                .tag(3)
         }
         .tint(Theme.accent)
     }

@@ -34,7 +34,7 @@ struct PrimaryButton: View {
         .foregroundStyle(.white)
         .background(Theme.accent)
         .clipShape(.rect(cornerRadius: 14))
-        .shadow(color: Theme.accentRing, radius: 11, x: 0, y: 5)
+        .shadowE3()
         .disabled(isLoading)
         .opacity(isLoading ? 0.75 : 1)
     }

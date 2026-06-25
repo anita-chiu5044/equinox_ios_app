@@ -301,6 +301,14 @@ extension APIClient {
         try await send("/sessions/today")
     }
 
+    func currentGrowth() async throws -> GrowthCycleDTO? {
+        try await send("/growth/current")
+    }
+
+    func growthHistory() async throws -> [GrowthCycleDTO] {
+        try await send("/growth/history")
+    }
+
     func todayCheckin() async throws -> CheckinDTO? {
         try await send("/checkins/today")
     }

@@ -1,5 +1,4 @@
 import SwiftUI
-import AuthenticationServices
 
 struct SignInView: View {
     @EnvironmentObject private var appState: AppState
@@ -45,18 +44,6 @@ struct SignInView: View {
             }
 
             VStack(spacing: 12) {
-                SignInWithAppleButton(.continue) { request in
-                    request.requestedScopes = [.fullName, .email]
-                } onCompletion: { result in
-                    Task {
-                        await appState.handleAppleAuthorization(result)
-                    }
-                }
-                .signInWithAppleButtonStyle(.black)
-                .frame(height: 54)
-                .clipShape(.rect(cornerRadius: 16))
-                .accessibilityLabel("Continue with Apple")
-
                 Button {
                     Task {
                         // Real browser OAuth (PKCE) when GOOGLE_IOS_CLIENT_ID

@@ -12,6 +12,29 @@ struct GoalDTO: Codable, Identifiable, Equatable {
     let materials: [MaterialDTO]
 }
 
+struct PlanStarProgress: Equatable {
+    let collected: Int
+    let total: Int
+
+    var isComplete: Bool {
+        total > 0 && collected >= total
+    }
+
+    var displayText: String {
+        total == 0 ? "0 stars" : "\(collected) / \(total) stars"
+    }
+}
+
+extension GoalDTO {
+    var sessionStarProgress: PlanStarProgress {
+        let sessions = phases.flatMap(\.sessions)
+        return PlanStarProgress(
+            collected: sessions.filter { $0.status == "done" }.count,
+            total: sessions.count
+        )
+    }
+}
+
 struct GoalCreateRequest: Encodable {
     let title: String
     let deadline: Date?

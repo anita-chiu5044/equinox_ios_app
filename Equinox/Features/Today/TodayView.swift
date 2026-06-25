@@ -8,6 +8,7 @@ final class TodayViewModel: ObservableObject {
     @Published var suggestion: SuggestionDTO?
     @Published var healthSuggestion: HealthKitService.EnergySuggestion?
     @Published var capacity: CapacityDTO?
+    @Published var growth: GrowthCycleDTO?
     @Published var pendingRevisions: [PlanRevisionDTO] = []
     @Published var isLoading = false
     @Published var isCheckingIn = false
@@ -66,11 +67,13 @@ final class TodayViewModel: ObservableObject {
             async let checkin = api.todayCheckin()
             async let suggestion = api.todaySuggestion()
             async let capacity = api.todayCapacity()
+            async let growth = api.currentGrowth()
 
             self.sessions = try await sessions
             self.checkin = try await checkin
             self.suggestion = try await suggestion
             self.capacity = try? await capacity
+            self.growth = try? await growth
             self.pendingRevisions = (try? await api.pendingRevisions()) ?? []
             store.cacheSessions(self.sessions)
             if let checkin = self.checkin {
@@ -118,33 +121,57 @@ final class TodayViewModel: ObservableObject {
         }
     }
 
-    static func statusAdvice(for energy: String) -> String {
-        switch energy {
-        case "great":
-            "Energy is strong. Start with one demanding session while your focus is fresh."
-        case "ok":
-            "Keep a balanced pace and leave a short break between focused sessions."
-        case "tired":
-            "Choose a shorter focus block first, then reassess before taking on harder work."
-        case "drained":
-            "Protect recovery today. Prioritize one essential task and defer optional deep work."
-        default:
-            "Use today's energy as a guide and adjust the plan when your focus changes."
-        }
-    }
-
-    func complete(_ session: SessionDTO, actualMinutes: Int, familiarity: Int) async {
+    func complete(_ session: SessionDTO, actualMinutes: Int, familiarity: Int) async -> SessionCompletionOutcome {
+        let previousGrowth = growth
+        var planCompletion: PlanCompletionReward?
         do {
             let synced = try await sync.completeSession(id: session.id, actualMinutes: actualMinutes, familiarity: familiarity)
             isOffline = !synced
             if synced {
                 await load()
+                planCompletion = await planCompletionReward(for: session)
             } else {
                 sessions = store.cachedTodaySessions()
             }
+            return SessionCompletionOutcome(
+                growthReward: growthReward(before: previousGrowth, after: growth),
+                planCompletion: planCompletion
+            )
         } catch {
             errorMessage = error.localizedDescription
+            return SessionCompletionOutcome(growthReward: nil, planCompletion: nil)
         }
+    }
+
+    private func planCompletionReward(for session: SessionDTO) async -> PlanCompletionReward? {
+        do {
+            let goal = try await api.goal(id: session.goalId)
+            let goalSessions = goal.phases.flatMap(\.sessions)
+            guard !goalSessions.isEmpty, goalSessions.allSatisfy({ $0.status == "done" }) else {
+                return nil
+            }
+            return PlanCompletionReward(
+                goalId: goal.id,
+                goalTitle: goal.title,
+                completedSessionCount: goalSessions.count,
+                completedMinutes: goalSessions.reduce(0) { $0 + ($1.actualMinutes ?? $1.minutes) }
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private func growthReward(before: GrowthCycleDTO?, after: GrowthCycleDTO?) -> GrowthReward? {
+        guard let after else {
+            return nil
+        }
+        let previousProgress = before?.progress ?? 0
+        let points = max(0, after.progress - previousProgress)
+        let didHatch = before?.state != "hatched" && after.state == "hatched"
+        guard points > 0 || didHatch else {
+            return nil
+        }
+        return GrowthReward(points: max(points, didHatch ? 1 : 0), didHatch: didHatch, cycle: after)
     }
 
     func previewSuggestion(_ option: SuggestionOptionDTO) async -> SuggestionPreviewDTO? {
@@ -177,16 +204,32 @@ final class TodayViewModel: ObservableObject {
 
 struct TodayView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("growthCompanionEnabled") private var growthCompanionEnabled = true
+    @AppStorage("activeSessionTimerID") private var activeSessionTimerID = ""
+    @AppStorage("activeSessionTimerStartedAt") private var activeSessionTimerStartedAt = 0.0
+    @AppStorage("lastSeenGrowthCycleID") private var lastSeenGrowthCycleID = ""
+    @AppStorage("lastSeenGrowthProgress") private var lastSeenGrowthProgress = 0
     @StateObject private var viewModel = TodayViewModel()
     @State private var showingSuggestion = false
+    @State private var showingEnergyPrompt = false
+    @State private var hasPresentedEnergyPrompt = false
+    @State private var energyPromptDayKey = ""
     @State private var completingSession: SessionDTO?
-    @State private var showingCheckinChange = false
+    @State private var measuredActualMinutes: [String: Int] = [:]
+    @State private var companionRewardPoints = 0
+    @State private var showingNest = false
+    var openPlans: () -> Void = {}
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.lg) {
                     greetingHeader
+
+                    if growthCompanionEnabled {
+                        growthCompanionCard
+                    }
 
                     if viewModel.isOffline {
                         OfflineBanner()
@@ -196,18 +239,8 @@ struct TodayView: View {
                         InlineErrorView(message: error)
                     }
 
-                    energyCheckin
-
                     if !viewModel.pendingRevisions.isEmpty {
                         pendingRevisionsBanner
-                    }
-
-                    if let capacity = viewModel.capacity {
-                        capacityCard(capacity)
-                    }
-
-                    if let checkin = viewModel.checkin {
-                        statusAdvice(for: checkin)
                     }
 
                     if let suggestion = viewModel.suggestion, suggestion.status == "pending" {
@@ -243,14 +276,69 @@ struct TodayView: View {
             .task {
                 await viewModel.load()
                 await viewModel.loadHealthSuggestion()
+                presentEnergyPromptIfNeeded()
             }
             .refreshable {
                 await viewModel.load()
             }
+            .onChange(of: viewModel.growth, initial: false) { _, growth in
+                handleGrowthChange(growth)
+            }
+            .onChange(of: viewModel.checkin, initial: false) { _, checkin in
+                if checkin != nil {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        showingEnergyPrompt = false
+                    }
+                }
+            }
+            .onChange(of: scenePhase, initial: false) { _, phase in
+                guard phase == .active else {
+                    return
+                }
+                Task {
+                    await viewModel.load()
+                    await viewModel.loadHealthSuggestion()
+                    presentEnergyPromptIfNeeded()
+                }
+            }
         }
+        .overlay {
+            if showingEnergyPrompt {
+                EnergyCheckinPromptDialog(
+                    healthSuggestion: viewModel.healthSuggestion,
+                    isSaving: viewModel.isCheckingIn
+                ) { energy in
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        showingEnergyPrompt = false
+                    }
+                    await viewModel.checkIn(energy: energy)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: showingEnergyPrompt)
         .sheet(item: $completingSession) { session in
-            CompletionFeedbackSheet(session: session) { actualMinutes, familiarity in
-                await viewModel.complete(session, actualMinutes: actualMinutes, familiarity: familiarity)
+            CompletionFeedbackSheet(
+                session: session,
+                userName: appState.user?.name,
+                measuredActualMinutes: measuredActualMinutes[session.id]
+            ) { actualMinutes, familiarity in
+                let outcome = await viewModel.complete(session, actualMinutes: actualMinutes, familiarity: familiarity)
+                if let reward = outcome.growthReward, reward.points > 0 {
+                    showCompanionReward(points: reward.points)
+                    if let cycle = reward.cycle {
+                        lastSeenGrowthCycleID = cycle.id
+                        lastSeenGrowthProgress = cycle.progress
+                    }
+                }
+                clearTimerIfNeeded(for: session)
+                measuredActualMinutes[session.id] = nil
+                return outcome
+            }
+        }
+        .sheet(isPresented: $showingNest) {
+            if let growth = viewModel.growth {
+                NestSheet(growth: growth)
             }
         }
     }
@@ -258,24 +346,52 @@ struct TodayView: View {
     // MARK: Greeting (design: mono date over serif greeting)
 
     private var greetingHeader: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(Date.now.formatted(.dateTime.weekday(.abbreviated).month(.wide).day()).uppercased())
-                .font(Theme.mono(11, weight: .semibold))
-                .foregroundStyle(Theme.accent)
-                .kerning(1.0)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(Date.now.formatted(.dateTime.weekday(.abbreviated).month(.wide).day()).uppercased())
+                    .font(Theme.mono(11, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .kerning(1.0)
 
-            Text("\(greeting), \(appState.user?.name ?? "there")")
-                .font(Theme.serif(28, weight: .semibold))
-                .foregroundStyle(Theme.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                Text("\(greeting), \(appState.user?.name ?? "there")")
+                    .font(Theme.serif(28, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
 
-            Text(summaryLine)
-                .font(Theme.sans(13))
-                .foregroundStyle(Theme.muted)
+                Text(summaryLine)
+                    .font(Theme.sans(13))
+                    .foregroundStyle(Theme.muted)
+            }
+
+            Spacer(minLength: 8)
+
+            if growthCompanionEnabled, let growth = viewModel.growth {
+                EggStatusPill(growth: growth) {
+                    showingNest = true
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.top, 12)
         .accessibilityElement(children: .combine)
+    }
+
+    private var growthCompanionCard: some View {
+        GrowthCompanionCard(
+            growth: viewModel.growth,
+            nextSession: heroSession,
+            isActiveSessionRunning: activeSessionTimerID == heroSession?.id,
+            isLowEnergy: isLowEnergy || isDCSLow,
+            rewardPoints: companionRewardPoints,
+            action: {
+                if viewModel.growth != nil {
+                    showingNest = true
+                } else {
+                    openPlans()
+                }
+            }
+        )
     }
 
     private var greeting: String {
@@ -317,9 +433,104 @@ struct TodayView: View {
         NowHeroCard(
             session: session,
             isLowEnergy: isLowEnergy || isDCSLow,
-            onStart: { completingSession = session },
+            activeStartedAt: activeStartedAt(for: session),
+            onStart: { startTimer(for: session) },
+            onEnd: { endTimer(for: session) },
             onMarkDone: { completingSession = session }
         )
+    }
+
+    private func activeStartedAt(for session: SessionDTO) -> Date? {
+        guard activeSessionTimerID == session.id, activeSessionTimerStartedAt > 0 else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: activeSessionTimerStartedAt)
+    }
+
+    private func startTimer(for session: SessionDTO) {
+        activeSessionTimerID = session.id
+        activeSessionTimerStartedAt = Date().timeIntervalSince1970
+        measuredActualMinutes[session.id] = nil
+    }
+
+    private func endTimer(for session: SessionDTO) {
+        guard let startedAt = activeStartedAt(for: session) else {
+            completingSession = session
+            return
+        }
+        measuredActualMinutes[session.id] = measuredMinutes(since: startedAt)
+        clearTimerIfNeeded(for: session)
+        completingSession = session
+    }
+
+    private func clearTimerIfNeeded(for session: SessionDTO) {
+        guard activeSessionTimerID == session.id else {
+            return
+        }
+        activeSessionTimerID = ""
+        activeSessionTimerStartedAt = 0
+    }
+
+    private func measuredMinutes(since startedAt: Date, now: Date = .now) -> Int {
+        max(1, Int(ceil(max(0, now.timeIntervalSince(startedAt)) / 60)))
+    }
+
+    private func handleGrowthChange(_ growth: GrowthCycleDTO?) {
+        guard let growth else {
+            return
+        }
+        guard lastSeenGrowthCycleID == growth.id else {
+            lastSeenGrowthCycleID = growth.id
+            lastSeenGrowthProgress = growth.progress
+            return
+        }
+        if growth.progress > lastSeenGrowthProgress {
+            showCompanionReward(points: growth.progress - lastSeenGrowthProgress)
+        }
+        lastSeenGrowthProgress = growth.progress
+    }
+
+    private func showCompanionReward(points: Int) {
+        guard points > 0 else {
+            return
+        }
+        companionRewardPoints = points
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            if companionRewardPoints == points {
+                companionRewardPoints = 0
+            }
+        }
+    }
+
+    private func presentEnergyPromptIfNeeded() {
+        resetEnergyPromptGateIfNeeded()
+        #if DEBUG
+        let forceEnergyPrompt = ProcessInfo.processInfo.arguments.contains("-ForceEnergyPrompt")
+        if forceEnergyPrompt, !hasPresentedEnergyPrompt {
+            hasPresentedEnergyPrompt = true
+            withAnimation(.easeOut(duration: 0.18)) {
+                showingEnergyPrompt = true
+            }
+            return
+        }
+        #endif
+        guard viewModel.checkin == nil, !hasPresentedEnergyPrompt else {
+            return
+        }
+        hasPresentedEnergyPrompt = true
+        withAnimation(.easeOut(duration: 0.18)) {
+            showingEnergyPrompt = true
+        }
+    }
+
+    private func resetEnergyPromptGateIfNeeded() {
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: .now)
+        let dayKey = "\(components.year ?? 0)-\(components.month ?? 0)-\(components.day ?? 0)"
+        guard energyPromptDayKey != dayKey else {
+            return
+        }
+        energyPromptDayKey = dayKey
+        hasPresentedEnergyPrompt = false
     }
 
     /// Energy options, matching the design (emoji + label per key).
@@ -329,127 +540,6 @@ struct TodayView: View {
         ("tired", "🥱", "A bit tired"),
         ("drained", "🪫", "Drained"),
     ]
-
-    @ViewBuilder
-    private var energyCheckin: some View {
-        if let checkin = viewModel.checkin,
-           let option = Self.energyOptions.first(where: { $0.key == checkin.energy }) {
-            Card {
-                HStack(spacing: 12) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(Theme.prioLow)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Today's check-in received")
-                            .font(Theme.sans(14, weight: .semibold))
-                            .foregroundStyle(Theme.ink)
-                        Text("Your energy status is locked until tomorrow.")
-                            .font(Theme.sans(12))
-                            .foregroundStyle(Theme.muted)
-                    }
-
-                    Spacer()
-
-                    VStack(alignment: .trailing, spacing: 6) {
-                        VStack(spacing: 2) {
-                            Text(option.emoji)
-                                .font(.title3)
-                            Text(option.label)
-                                .font(Theme.mono(10, weight: .semibold))
-                                .foregroundStyle(Theme.inkSoft)
-                        }
-                        Button("Change") {
-                            showingCheckinChange = true
-                        }
-                        .font(Theme.sans(11, weight: .semibold))
-                        .foregroundStyle(Theme.muted)
-                        .accessibilityLabel("Change today's energy check-in")
-                    }
-                }
-            }
-            .sheet(isPresented: $showingCheckinChange) {
-                CheckinChangeSheet { energy in
-                    await viewModel.checkIn(energy: energy)
-                    showingCheckinChange = false
-                }
-            }
-            .accessibilityLabel("Today's check-in received. Energy: \(option.label). Tap Change to update.")
-        } else {
-            // Not answered yet → the four-option grid from the design.
-            Card {
-                VStack(alignment: .leading, spacing: 13) {
-                    Text("How's your energy today?")
-                        .font(Theme.serif(17, weight: .regular))
-                        .foregroundStyle(Theme.ink)
-
-                    if let hint = viewModel.healthSuggestion,
-                       let option = Self.energyOptions.first(where: { $0.key == hint.energyKey }) {
-                        let hours = String(format: "%.1f", hint.sleepHours)
-                        Label(
-                            "Last night you slept \(hours) h — you might be feeling \"\(option.label)\".",
-                            systemImage: "heart.fill"
-                        )
-                        .font(Theme.sans(12))
-                        .foregroundStyle(Theme.inkSoft)
-                        .accessibilityLabel("Health suggestion: you slept \(hours) hours, you might be feeling \(option.label)")
-                    }
-
-                    HStack(spacing: 8) {
-                        ForEach(Self.energyOptions, id: \.key) { option in
-                            Button {
-                                Task {
-                                    await viewModel.checkIn(energy: option.key)
-                                }
-                            } label: {
-                                VStack(spacing: 6) {
-                                    Text(option.emoji)
-                                        .font(.system(size: 23))
-                                    Text(option.label)
-                                        .font(Theme.sans(10.5, weight: .medium))
-                                        .foregroundStyle(Theme.inkSoft)
-                                        .multilineTextAlignment(.center)
-                                        .lineLimit(2)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                            }
-                            .buttonStyle(.plain)
-                            .background(Theme.surface2)
-                            .clipShape(.rect(cornerRadius: 10))
-                            .disabled(viewModel.isCheckingIn)
-                            .accessibilityLabel("Energy: \(option.label)")
-                        }
-                    }
-
-                    if viewModel.isCheckingIn {
-                        ProgressView("Saving today's check-in...")
-                            .font(Theme.sans(12))
-                    }
-                }
-            }
-        }
-    }
-
-    private func statusAdvice(for checkin: CheckinDTO) -> some View {
-        Card {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "waveform.path.ecg")
-                    .font(.title3)
-                    .foregroundStyle(Theme.accent)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Status suggestion")
-                        .font(Theme.sans(14, weight: .semibold))
-                        .foregroundStyle(Theme.ink)
-                    Text(TodayViewModel.statusAdvice(for: checkin.energy))
-                        .font(Theme.sans(13))
-                        .foregroundStyle(Theme.inkSoft)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
 
     private func suggestionTeaser(_ suggestion: SuggestionDTO) -> some View {
         Button {
@@ -491,25 +581,6 @@ struct TodayView: View {
         }
     }
 
-    private func capacityCard(_ capacity: CapacityDTO) -> some View {
-        Card {
-            HStack(spacing: 12) {
-                Image(systemName: "gauge.with.dots.needle.50percent")
-                    .font(.title3)
-                    .foregroundStyle(Theme.accent)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Today's capacity: \(capacity.dcs)/100")
-                        .font(Theme.sans(14, weight: .semibold))
-                        .foregroundStyle(Theme.ink)
-                    Text(capacity.dcs < 60 ? "A lighter learning load is recommended." : "Your plan is matched to today's capacity.")
-                        .font(Theme.sans(12))
-                        .foregroundStyle(Theme.muted)
-                }
-                Spacer()
-            }
-        }
-    }
-
     private var pendingRevisionsBanner: some View {
         Button {
             // Navigate to Plans tab
@@ -542,15 +613,17 @@ struct TodayView: View {
 
     // MARK: Timeline row (design: time gutter · rail dot · card)
 
+    // Timeline focus discipline: exactly one accent dot per screen (status "now")
+    private func dotColor(for session: SessionDTO) -> Color {
+        if session.status == "now"     { return Theme.accent }   // Vermillion, the single focus point
+        if session.status == "overdue" { return Theme.prioMed }  // Amber
+        return Theme.faint                                       // Muted for everything else
+    }
+
     private func timelineRow(_ session: SessionDTO, isLast: Bool) -> some View {
         let isDone    = session.status == "done"
         let isNow     = session.status == "now"
         let isOverdue = session.status == "overdue"
-
-        let railColor: Color = isDone ? Theme.faint
-                             : isOverdue ? Theme.prioMed
-                             : isNow ? Theme.accent
-                             : Theme.faint
 
         return HStack(alignment: .top, spacing: 11) {
             // Time gutter — fixed 42 pt, right-aligned mono times
@@ -572,9 +645,8 @@ struct TodayView: View {
             // Rail: dot + vertical connector line
             VStack(spacing: 0) {
                 Circle()
-                    .fill(isNow ? Theme.accent : Color.white)
+                    .fill(dotColor(for: session))
                     .frame(width: 11, height: 11)
-                    .overlay(Circle().stroke(railColor, lineWidth: 2))
                     .overlay(isNow ? Circle().stroke(Theme.accentWash, lineWidth: 4).padding(-2) : nil)
                     .padding(.top, 16)
 
@@ -665,16 +737,344 @@ struct TodayView: View {
     }
 }
 
+// MARK: - Energy check-in prompt
+
+private struct EnergyCheckinPromptDialog: View {
+    let healthSuggestion: HealthKitService.EnergySuggestion?
+    let isSaving: Bool
+    let onSelect: (String) async -> Void
+
+    @State private var selectedIndex = 2
+
+    private static let dialOptions: [EnergyDialOption] = [
+        EnergyDialOption(key: "drained", emoji: "🪫", label: "Drained", progress: 0.00, tint: Color(hex: "c94f46")),
+        EnergyDialOption(key: "tired", emoji: "🥱", label: "A bit tired", progress: 0.33, tint: Color(hex: "d5973d")),
+        EnergyDialOption(key: "ok", emoji: "🔋", label: "Okay", progress: 0.67, tint: Color(hex: "7fa66a")),
+        EnergyDialOption(key: "great", emoji: "⚡", label: "Very good", progress: 1.00, tint: Color(hex: "45a66f")),
+    ]
+
+    private var selectedOption: EnergyDialOption {
+        Self.dialOptions[min(max(selectedIndex, 0), Self.dialOptions.count - 1)]
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 15) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("How's your energy today?")
+                        .font(Theme.serif(23, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("Equinox will use this to keep today's plan humane, not to judge your pace.")
+                        .font(Theme.sans(13))
+                        .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let hint = healthSuggestion,
+                   let option = TodayView.energyOptions.first(where: { $0.key == hint.energyKey }) {
+                    let hours = String(format: "%.1f", hint.sleepHours)
+                    Label(
+                        "Last night you slept \(hours) h — you might be feeling \"\(option.label)\".",
+                        systemImage: "heart.fill"
+                    )
+                    .font(Theme.sans(12))
+                    .foregroundStyle(Theme.inkSoft)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 9)
+                    .background(Theme.surface2)
+                    .clipShape(.rect(cornerRadius: 13))
+                    .accessibilityLabel("Health suggestion: you slept \(hours) hours, you might be feeling \(option.label)")
+                }
+
+                EnergyProgressDial(
+                    options: Self.dialOptions,
+                    selectedIndex: $selectedIndex
+                )
+                .frame(maxWidth: .infinity)
+
+                Button {
+                    Task {
+                        await onSelect(selectedOption.key)
+                    }
+                } label: {
+                    Text("Set energy")
+                        .font(Theme.sans(14, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .background(selectedOption.tint)
+                .clipShape(.rect(cornerRadius: 15))
+                .shadow(color: selectedOption.tint.opacity(0.28), radius: 10, x: 0, y: 5)
+                .disabled(isSaving)
+                .accessibilityLabel("Set energy to \(selectedOption.label)")
+
+                if isSaving {
+                    ProgressView("Saving today's check-in...")
+                        .font(Theme.sans(12))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: 344, alignment: .leading)
+            .background(Theme.paper)
+            .clipShape(.rect(cornerRadius: 26))
+            .overlay {
+                RoundedRectangle(cornerRadius: 26)
+                    .strokeBorder(Theme.line2, lineWidth: 1)
+            }
+            .shadow(color: Theme.shadowInk.opacity(0.22), radius: 28, x: 0, y: 16)
+            .padding(.horizontal, 24)
+        }
+        .accessibilityAddTraits(.isModal)
+        .onAppear {
+            if let hintIndex = Self.dialOptions.firstIndex(where: { $0.key == healthSuggestion?.energyKey }) {
+                selectedIndex = hintIndex
+            }
+        }
+    }
+}
+
+private struct EnergyDialOption: Identifiable {
+    let key: String
+    let emoji: String
+    let label: String
+    let progress: Double
+    let tint: Color
+
+    var id: String { key }
+    var percentLabel: String { "\(Int(round(progress * 100)))%" }
+}
+
+private struct EnergyProgressDial: View {
+    let options: [EnergyDialOption]
+    @Binding var selectedIndex: Int
+
+    private var selectedOption: EnergyDialOption {
+        options[min(max(selectedIndex, 0), options.count - 1)]
+    }
+
+    private var gaugeGradient: LinearGradient {
+        LinearGradient(
+            colors: options.map(\.tint),
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            GeometryReader { proxy in
+                let width = proxy.size.width
+                let height = proxy.size.height
+                let center = CGPoint(x: width / 2, y: height * 0.78)
+                let radius = min(width * 0.41, height * 0.68)
+                let needleLength = radius * 0.78
+
+                ZStack {
+                    GaugeArc(progress: 1)
+                        .stroke(
+                            gaugeGradient,
+                            style: StrokeStyle(lineWidth: 24, lineCap: .round)
+                        )
+                        .frame(width: radius * 2, height: radius)
+                        .position(x: center.x, y: center.y - radius / 2)
+                        .opacity(0.22)
+
+                    GaugeArc(progress: selectedOption.progress)
+                        .stroke(
+                            gaugeGradient,
+                            style: StrokeStyle(lineWidth: 24, lineCap: .round)
+                        )
+                        .frame(width: radius * 2, height: radius)
+                        .position(x: center.x, y: center.y - radius / 2)
+                        .animation(.easeOut(duration: 0.22), value: selectedIndex)
+
+                    ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
+                        Button {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                selectedIndex = index
+                            }
+                        } label: {
+                            GaugeTick(tint: option.tint, isSelected: index == selectedIndex)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(options.isEmpty)
+                        .position(point(for: option.progress, center: center, radius: radius))
+                        .accessibilityLabel("Choose \(option.label), \(option.percentLabel)")
+                    }
+
+                    GaugeNeedle(progress: selectedOption.progress)
+                        .fill(selectedOption.tint)
+                        .frame(width: needleLength * 2, height: needleLength)
+                        .position(x: center.x, y: center.y - needleLength / 2)
+                        .shadow(color: selectedOption.tint.opacity(0.24), radius: 6, x: 0, y: 3)
+                        .animation(.spring(response: 0.34, dampingFraction: 0.76), value: selectedIndex)
+
+                    VStack(spacing: 3) {
+                        Text(selectedOption.label)
+                            .font(Theme.sans(15, weight: .semibold))
+                            .foregroundStyle(Theme.ink)
+                        Text(selectedOption.percentLabel)
+                            .font(Theme.mono(12, weight: .semibold))
+                            .foregroundStyle(selectedOption.tint)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(selectedOption.tint.opacity(0.10))
+                    .clipShape(.capsule)
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(selectedOption.tint.opacity(0.18), lineWidth: 1)
+                    }
+                    .position(x: center.x, y: height - 16)
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            withAnimation(.easeOut(duration: 0.12)) {
+                                selectedIndex = nearestIndex(to: value.location, center: center)
+                            }
+                        }
+                )
+            }
+            .frame(height: 174)
+
+            Text("Move the needle to match your current capacity.")
+                .font(Theme.sans(12))
+                .foregroundStyle(Theme.muted)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func point(for progress: Double, center: CGPoint, radius: CGFloat) -> CGPoint {
+        let angle = CGFloat(Double.pi - progress * Double.pi)
+        return CGPoint(
+            x: center.x + cos(angle) * radius,
+            y: center.y - sin(angle) * radius
+        )
+    }
+
+    private func nearestIndex(to location: CGPoint, center: CGPoint) -> Int {
+        guard !options.isEmpty else {
+            return 0
+        }
+        let angle = atan2(center.y - location.y, location.x - center.x)
+        let clampedAngle = min(max(Double(angle), 0), Double.pi)
+        let normalizedProgress = 1 - (clampedAngle / Double.pi)
+        let nearest = options.enumerated().min { lhs, rhs in
+            abs(lhs.element.progress - normalizedProgress) < abs(rhs.element.progress - normalizedProgress)
+        }
+        return nearest?.offset ?? selectedIndex
+    }
+}
+
+private struct GaugeArc: Shape {
+    var progress: Double
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let clampedProgress = min(max(progress, 0), 1)
+        let radius = min(rect.width / 2, rect.height)
+        let center = CGPoint(x: rect.midX, y: rect.maxY)
+        let samples = max(2, Int(64 * clampedProgress))
+        var path = Path()
+
+        for step in 0...samples {
+            let localProgress = clampedProgress * Double(step) / Double(samples)
+            let angle = Double.pi - localProgress * Double.pi
+            let point = CGPoint(
+                x: center.x + cos(angle) * radius,
+                y: center.y - sin(angle) * radius
+            )
+            if step == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
+        }
+
+        return path
+    }
+}
+
+private struct GaugeNeedle: Shape {
+    var progress: Double
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.maxY)
+        let length = min(rect.width / 2, rect.height) * 0.96
+        let angle = Double.pi - min(max(progress, 0), 1) * Double.pi
+        let tip = CGPoint(
+            x: center.x + cos(angle) * length,
+            y: center.y - sin(angle) * length
+        )
+        let perpendicular = angle + Double.pi / 2
+        let baseWidth: CGFloat = 13
+        let left = CGPoint(
+            x: center.x + cos(perpendicular) * baseWidth,
+            y: center.y - sin(perpendicular) * baseWidth
+        )
+        let right = CGPoint(
+            x: center.x - cos(perpendicular) * baseWidth,
+            y: center.y + sin(perpendicular) * baseWidth
+        )
+
+        var path = Path()
+        path.move(to: tip)
+        path.addLine(to: left)
+        path.addQuadCurve(to: right, control: CGPoint(x: center.x, y: center.y + 16))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct GaugeTick: View {
+    let tint: Color
+    let isSelected: Bool
+
+    var body: some View {
+        Circle()
+            .fill(isSelected ? tint : Theme.paper)
+            .frame(width: isSelected ? 18 : 12, height: isSelected ? 18 : 12)
+            .overlay {
+                Circle()
+                    .strokeBorder(isSelected ? tint.opacity(0.40) : Theme.line2, lineWidth: 1.2)
+            }
+            .shadow(color: isSelected ? tint.opacity(0.26) : .clear, radius: 7, x: 0, y: 3)
+            .frame(width: 44, height: 44)
+    }
+}
+
 // MARK: - NowHeroCard (pulse animation + Start / Mark done)
 
 private struct NowHeroCard: View {
     let session: SessionDTO
     var isLowEnergy: Bool = false
+    let activeStartedAt: Date?
     let onStart: () -> Void
+    let onEnd: () -> Void
     let onMarkDone: () -> Void
 
     @State private var pulsing = false
-    @State private var sessionStarted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -710,7 +1110,7 @@ private struct NowHeroCard: View {
             }
 
             Text(session.title)
-                .font(Theme.sans(22, weight: .bold))
+                .font(Theme.TextStyle.heroTitle)
                 .foregroundStyle(Theme.ink)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -737,12 +1137,30 @@ private struct NowHeroCard: View {
                 DifficultyBars(difficulty: session.difficulty)
             }
 
-            if sessionStarted {
-                // After tapping "Start" — show Mark done prominently
+            if let activeStartedAt {
+                TimelineView(.periodic(from: activeStartedAt, by: 1)) { context in
+                    HStack(spacing: 8) {
+                        Image(systemName: "timer")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                        Text(elapsedText(from: activeStartedAt, to: context.date))
+                            .font(Theme.mono(13, weight: .semibold))
+                            .foregroundStyle(Theme.ink)
+                        Text("actual time running")
+                            .font(Theme.sans(12))
+                            .foregroundStyle(Theme.muted)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .background(Theme.surface.opacity(0.72))
+                    .clipShape(.capsule)
+                }
+
                 Button {
-                    onMarkDone()
+                    onEnd()
                 } label: {
-                    Label("Mark done", systemImage: "checkmark")
+                    Label("End session", systemImage: "stop.fill")
                         .font(Theme.sans(14, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
@@ -752,13 +1170,11 @@ private struct NowHeroCard: View {
                 .background(Theme.accent)
                 .clipShape(.rect(cornerRadius: 14))
                 .shadow(color: Theme.accentRing, radius: 11, x: 0, y: 5)
-                .accessibilityLabel("Mark \(session.title) as done")
+                .accessibilityLabel("End \(session.title) and record actual time")
             } else {
                 HStack(spacing: 10) {
                     Button {
-                        withAnimation(.spring(response: 0.3)) {
-                            sessionStarted = true
-                        }
+                        onStart()
                     } label: {
                         Label("Start session", systemImage: "play.fill")
                             .font(Theme.sans(14, weight: .semibold))
@@ -800,8 +1216,18 @@ private struct NowHeroCard: View {
             RoundedRectangle(cornerRadius: 22)
                 .stroke(Theme.accentRing, lineWidth: 1)
         }
-        .shadow(color: Theme.shadowInk.opacity(0.05), radius: 1, x: 0, y: 1)
-        .shadow(color: Theme.shadowInk.opacity(0.22), radius: 20, x: 0, y: 12)
+        .shadowE2()
+    }
+
+    private func elapsedText(from start: Date, to now: Date) -> String {
+        let elapsed = max(0, Int(now.timeIntervalSince(start)))
+        let hours = elapsed / 3600
+        let minutes = (elapsed % 3600) / 60
+        let seconds = elapsed % 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        }
+        return "\(minutes)m \(String(format: "%02d", seconds))s"
     }
 }
 
@@ -858,62 +1284,6 @@ private struct OpenDayBanner: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 44)
-    }
-}
-
-// MARK: - CheckinChangeSheet
-
-private struct CheckinChangeSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let onSelect: (String) async -> Void
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                Text("Update today's energy")
-                    .font(Theme.serif(24))
-                    .foregroundStyle(Theme.ink)
-
-                HStack(spacing: 12) {
-                    ForEach(TodayView.energyOptions, id: \.key) { option in
-                        Button {
-                            Task {
-                                await onSelect(option.key)
-                            }
-                        } label: {
-                            VStack(spacing: 8) {
-                                Text(option.emoji)
-                                    .font(.system(size: 28))
-                                Text(option.label)
-                                    .font(Theme.sans(11, weight: .medium))
-                                    .foregroundStyle(Theme.inkSoft)
-                                    .multilineTextAlignment(.center)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                        }
-                        .buttonStyle(.plain)
-                        .background(Theme.surface)
-                        .clipShape(.rect(cornerRadius: 14))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .strokeBorder(Theme.faint.opacity(0.5), lineWidth: 1)
-                        )
-                    }
-                }
-                .padding(.horizontal, 20)
-
-                Spacer()
-            }
-            .padding(.top, 32)
-            .background(Theme.paper)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.fraction(0.45)])
     }
 }
 

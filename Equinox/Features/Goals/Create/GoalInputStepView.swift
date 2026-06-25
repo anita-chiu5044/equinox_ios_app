@@ -15,14 +15,20 @@ struct GoalInputStepView: View {
 
                 // ── Goal field — serif large, accent underline ──
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Your goal")
+                    Text("What are you working toward?")
                         .font(Theme.mono(10.5, weight: .semibold))
-                        .foregroundStyle(focusedField == .title ? Theme.accentDeep : Theme.muted)
+                        .foregroundStyle(focusedField == .title ? Theme.accentDeep : Theme.inkSoft)
                         .kerning(1.4)
                         .textCase(.uppercase)
 
-                    TextField("What do you want to accomplish?", text: $viewModel.title, axis: .vertical)
-                        .font(Theme.serif(28))
+                    TextField(
+                        "",
+                        text: $viewModel.title,
+                        prompt: Text("Name your goal")
+                            .foregroundStyle(Theme.inkSoft.opacity(0.82)),
+                        axis: .vertical
+                    )
+                        .font(Theme.TextStyle.display)
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1...4)
                         .focused($focusedField, equals: .title)
@@ -159,16 +165,16 @@ struct GoalInputStepView: View {
                         .disabled(viewModel.isUploadingMaterial)
                     }
 
-                    Text("Text PDFs are parsed securely by Equinox. For scanned files, paste the relevant course text below.")
+                    Text("Text PDFs are parsed securely by Equinox. For scanned files, paste any goal context or notes below.")
                         .font(Theme.sans(11.5))
                         .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 28)
 
-                // ── Course text ──
+                // ── Goal and notes ──
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Course text (optional)")
+                    Text("Goal and notes (optional)")
                         .font(Theme.mono(10.5, weight: .semibold))
                         .foregroundStyle(focusedField == .sourceText ? Theme.accentDeep : Theme.muted)
                         .kerning(1.4)
@@ -195,9 +201,9 @@ struct GoalInputStepView: View {
                             radius: 6, x: 0, y: 0
                         )
                         .animation(.easeOut(duration: 0.15), value: focusedField == .sourceText)
-                        .accessibilityLabel("Course text or syllabus")
+                        .accessibilityLabel("Goal and notes")
 
-                    Text("Paste an outline, syllabus, or text from a scanned PDF so the plan can use the actual material.")
+                    Text("Paste an outline, syllabus, scanned PDF text, or notes so the plan can use the actual material.")
                         .font(Theme.sans(11.5))
                         .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)

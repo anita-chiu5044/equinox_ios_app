@@ -18,7 +18,6 @@ struct Card<Content: View>: View {
                     .stroke(Theme.line2, lineWidth: 1)
             }
             // Two-layer warm shadow (e1): crisp contact + soft lift.
-            .shadow(color: Theme.shadowInk.opacity(0.04), radius: 1, x: 0, y: 1)
-            .shadow(color: Theme.shadowInk.opacity(0.16), radius: 18, x: 0, y: 12)
+            .shadowE1()
     }
 }

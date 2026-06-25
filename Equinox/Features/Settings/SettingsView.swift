@@ -85,6 +85,8 @@ struct SettingsView: View {
 
     @AppStorage("productiveStart") private var productiveStart: Int = 9
     @AppStorage("productiveEnd") private var productiveEnd: Int = 17
+    @AppStorage("growthCompanionEnabled") private var growthCompanionEnabled = true
+    @AppStorage("growthReduceMotion") private var growthReduceMotion = false
 
     @State private var showDeleteAlert = false
     @State private var showStorageInfo = false
@@ -371,6 +373,36 @@ struct SettingsView: View {
                         .onAppear {
                             assertivenessIndex = assertivenessModes.firstIndex(of: settings.suggestionMode) ?? 1
                         }
+                    }
+
+                    SettingsGroup(title: "GROWTH COMPANION", footer: "Orb only responds to learning actions. Rest, delays, and low-energy days never subtract progress.") {
+                        Toggle(isOn: $growthCompanionEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Growth companion")
+                                    .font(Theme.sans(15))
+                                    .foregroundStyle(Theme.ink)
+                                Text("Show Orb and glow progress on Today")
+                                    .font(Theme.sans(12))
+                                    .foregroundStyle(Theme.muted)
+                            }
+                        }
+                        .tint(Theme.accent)
+                        .padding(.vertical, 4)
+
+                        Divider().padding(.leading, 16)
+
+                        Toggle(isOn: $growthReduceMotion) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Reduce motion")
+                                    .font(Theme.sans(15))
+                                    .foregroundStyle(Theme.ink)
+                                Text("Reduce hatching and stardust animations")
+                                    .font(Theme.sans(12))
+                                    .foregroundStyle(Theme.muted)
+                            }
+                        }
+                        .tint(Theme.accent)
+                        .padding(.vertical, 4)
                     }
 
                     // Data & privacy

@@ -99,7 +99,7 @@ final class GoogleOAuthService: NSObject {
     /// Calendar consent: returns the auth code so the *backend* can do the
     /// exchange and keep the refresh token server-side.
     func authorizeCalendar() async throws -> CalendarAuthorization {
-        try await authorize(scopes: "https://www.googleapis.com/auth/calendar.readonly")
+        try await authorize(scopes: "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events")
     }
 
     // MARK: Browser leg

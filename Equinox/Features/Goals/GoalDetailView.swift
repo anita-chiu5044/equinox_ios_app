@@ -66,7 +66,7 @@ final class GoalDetailViewModel: ObservableObject {
         }
     }
 
-    func complete(_ session: SessionDTO) async {
+    func complete(_ session: SessionDTO) async -> SessionCompletionOutcome {
         do {
             let synced = try await sync.completeSession(id: session.id, actualMinutes: session.minutes)
             isOffline = !synced
@@ -75,9 +75,30 @@ final class GoalDetailViewModel: ObservableObject {
             } else {
                 goal = store.cachedGoal(id: goalID)
             }
+            return SessionCompletionOutcome(
+                growthReward: nil,
+                planCompletion: planCompletionReward()
+            )
         } catch {
             errorMessage = error.localizedDescription
+            return SessionCompletionOutcome(growthReward: nil, planCompletion: nil)
         }
+    }
+
+    private func planCompletionReward() -> PlanCompletionReward? {
+        guard let goal else {
+            return nil
+        }
+        let sessions = goal.phases.flatMap(\.sessions)
+        guard !sessions.isEmpty, sessions.allSatisfy({ $0.status == "done" }) else {
+            return nil
+        }
+        return PlanCompletionReward(
+            goalId: goal.id,
+            goalTitle: goal.title,
+            completedSessionCount: sessions.count,
+            completedMinutes: sessions.reduce(0) { $0 + ($1.actualMinutes ?? $1.minutes) }
+        )
     }
 
     func setFamiliarity(_ value: Int, for session: SessionDTO) async {
@@ -178,6 +199,8 @@ struct GoalDetailView: View {
 
     @StateObject private var viewModel: GoalDetailViewModel
     @State private var showingRecheck = false
+    @State private var completionPresentation: GoalDetailCompletionPresentation?
+    @EnvironmentObject private var appState: AppState
 
     init(goalID: String) {
         _viewModel = StateObject(wrappedValue: GoalDetailViewModel(goalID: goalID))
@@ -283,6 +306,18 @@ struct GoalDetailView: View {
                 ProgressView("Loading plan...")
             }
         }
+        .sheet(item: $completionPresentation) { presentation in
+            SessionCompletionRewardContent(
+                session: presentation.session,
+                userName: appState.user?.name,
+                actualMinutes: presentation.actualMinutes,
+                completedAt: presentation.completedAt,
+                completionOutcome: presentation.outcome,
+                onDone: {
+                    completionPresentation = nil
+                }
+            )
+        }
         .refreshable {
             await viewModel.load()
         }
@@ -304,6 +339,8 @@ struct GoalDetailView: View {
                 ProgressView(value: Double(goal.progress.pct), total: 100)
                     .tint(Theme.accent)
 
+                planStarsStatus(goal.sessionStarProgress)
+
                 HStack {
                     Text("\(goal.progress.pct)% complete")
                     Spacer()
@@ -314,6 +351,46 @@ struct GoalDetailView: View {
                 .font(Theme.mono(12))
                 .foregroundStyle(Theme.muted)
             }
+        }
+    }
+
+    private func planStarsStatus(_ progress: PlanStarProgress) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill((progress.isComplete ? Theme.prioLow : Theme.prioMed).opacity(0.14))
+                    .frame(width: 34, height: 34)
+                Image(systemName: progress.isComplete ? "sparkles" : "star.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(progress.isComplete ? Theme.prioLow : Theme.prioMed)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(progress.isComplete ? "Plan stars complete" : "\(progress.collected) / \(progress.total) stars collected")
+                    .font(Theme.sans(13.5, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+
+                HStack(spacing: 4) {
+                    ForEach(0..<max(progress.total, 1), id: \.self) { index in
+                        Image(systemName: index < progress.collected ? "star.fill" : "star")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(index < progress.collected ? Theme.prioMed : Theme.faint.opacity(0.72))
+                    }
+                }
+
+                Text(progress.isComplete ? "Your plan certificate is unlocked." : "Complete sessions to help Orb collect stars.")
+                    .font(Theme.sans(12))
+                    .foregroundStyle(Theme.muted)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Theme.surface2.opacity(0.82))
+        .clipShape(.rect(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder((progress.isComplete ? Theme.prioLow : Theme.prioMed).opacity(0.18), lineWidth: 1)
         }
     }
 
@@ -456,7 +533,16 @@ struct GoalDetailView: View {
                 HStack {
                     Button(session.status == "done" ? "Done ✓" : "Mark done") {
                         Task {
-                            await viewModel.complete(session)
+                            let completedAt = Date()
+                            let outcome = await viewModel.complete(session)
+                            if outcome.planCompletion != nil {
+                                completionPresentation = GoalDetailCompletionPresentation(
+                                    session: session,
+                                    actualMinutes: session.minutes,
+                                    completedAt: completedAt,
+                                    outcome: outcome
+                                )
+                            }
                         }
                     }
                     .font(Theme.sans(13, weight: .semibold))
@@ -492,6 +578,14 @@ struct GoalDetailView: View {
             }
         }
     }
+}
+
+private struct GoalDetailCompletionPresentation: Identifiable {
+    let id = UUID()
+    let session: SessionDTO
+    let actualMinutes: Int
+    let completedAt: Date
+    let outcome: SessionCompletionOutcome
 }
 
 private struct RecheckPlanSheet: View {

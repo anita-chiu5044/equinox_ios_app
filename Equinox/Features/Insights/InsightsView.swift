@@ -6,6 +6,7 @@ final class InsightsViewModel: ObservableObject {
     @Published var insights: InsightsDTO?
     @Published var healthSnapshot: HealthKitService.HealthSnapshot?
     @Published var learningProfile: LearningProfileDTO?
+    @Published var capacity: CapacityDTO?
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -24,8 +25,10 @@ final class InsightsViewModel: ObservableObject {
         do {
             async let insightsRequest = api.insights()
             async let profileRequest = api.learningProfile()
+            async let capacityRequest = api.todayCapacity()
             insights = try await insightsRequest
             learningProfile = try? await profileRequest
+            capacity = try? await capacityRequest
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -66,6 +69,10 @@ struct InsightsView: View {
                         }
 
                         healthCard(insights.healthAnalysis, snapshot: viewModel.healthSnapshot)
+
+                        if let capacity = viewModel.capacity {
+                            todayCapacityCard(capacity)
+                        }
 
                         if let profile = viewModel.learningProfile {
                             learningProfileCard(profile)
@@ -257,6 +264,58 @@ struct InsightsView: View {
             Text(label)
                 .font(Theme.mono(10))
                 .foregroundStyle(Theme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func todayCapacityCard(_ capacity: CapacityDTO) -> some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "gauge.with.dots.needle.50percent")
+                        .font(.title3)
+                        .foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Today's capacity")
+                            .font(Theme.sans(16, weight: .semibold))
+                            .foregroundStyle(Theme.ink)
+                        Text(capacity.date)
+                            .font(Theme.mono(10))
+                            .foregroundStyle(Theme.muted)
+                    }
+                    Spacer()
+                    Text("\(capacity.dcs)/100")
+                        .font(Theme.serif(26, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                }
+
+                Text(capacity.dcs < 60
+                     ? "A lighter learning load is recommended today."
+                     : "Your plan is matched to today's capacity.")
+                    .font(Theme.sans(13))
+                    .foregroundStyle(Theme.inkSoft)
+
+                HStack(spacing: 12) {
+                    capacityMetric("Sleep", capacity.sleepScore)
+                    capacityMetric("Activity", capacity.activityScore)
+                    capacityMetric("Fatigue", capacity.fatigueScore)
+                    capacityMetric("Completion", capacity.completionScore)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func capacityMetric(_ label: String, _ value: Int?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value.map { "\($0)" } ?? "--")
+                .font(Theme.mono(13, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+            Text(label)
+                .font(Theme.mono(9.5))
+                .foregroundStyle(Theme.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

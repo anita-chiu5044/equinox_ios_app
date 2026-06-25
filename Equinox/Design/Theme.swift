@@ -57,6 +57,47 @@ enum Theme {
         static let hero: CGFloat = 22
     }
 
+    // ── Elevation / shadow tokens (e1 / e2 / e3) ────────────
+    enum Shadow {
+        // e1 — base card shadow (two layers: crisp contact + soft lift).
+        struct e1: ViewModifier {
+            func body(content: Content) -> some View {
+                content
+                    .shadow(color: Theme.shadowInk.opacity(0.06), radius: 1, y: 1)
+                    .shadow(color: Theme.shadowInk.opacity(0.09), radius: 18, y: 6)
+            }
+        }
+        // e2 — Hero card shadow (vermillion halo + faint contact).
+        struct e2: ViewModifier {
+            func body(content: Content) -> some View {
+                content
+                    .shadow(color: Theme.accentDeep.opacity(0.45), radius: 22, y: 8)
+                    .shadow(color: Theme.shadowInk.opacity(0.05), radius: 2, y: 1)
+            }
+        }
+        // e3 — Primary button shadow (deep vermillion lift).
+        struct e3: ViewModifier {
+            func body(content: Content) -> some View {
+                content
+                    .shadow(color: Theme.accentDeep.opacity(0.55), radius: 22, x: 0, y: 10)
+            }
+        }
+    }
+
+    // ── Text styles (semantic font presets) ─────────────────
+    // Use these instead of raw Theme.serif/.sans/.mono calls so
+    // type scale stays consistent across the app.
+    enum TextStyle {
+        static var display:   Font { Theme.serif(28) }                  // Large title
+        static var title:     Font { Theme.serif(21) }                  // Section title
+        static var heroTitle: Font { Theme.sans(23, weight: .bold) }    // Hero title
+        static var cardTitle: Font { Theme.sans(15, weight: .semibold) }// Card title
+        static var body:      Font { Theme.sans(14) }                   // Body text
+        static var small:     Font { Theme.sans(12.5) }                 // Helper text
+        static var quote:     Font { Theme.serif(16).italic() }         // Reflective prompt
+        static var label:     Font { Theme.mono(11) }                   // Label / time
+    }
+
     // `relativeTo:` keeps custom fonts scaling with Dynamic Type.
     static func serif(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         font(
@@ -122,6 +163,13 @@ enum Theme {
             prioMed
         }
     }
+}
+
+// MARK: - Elevation helpers (e1 / e2 / e3)
+extension View {
+    func shadowE1() -> some View { modifier(Theme.Shadow.e1()) }
+    func shadowE2() -> some View { modifier(Theme.Shadow.e2()) }
+    func shadowE3() -> some View { modifier(Theme.Shadow.e3()) }
 }
 
 extension Color {

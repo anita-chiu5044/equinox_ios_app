@@ -28,8 +28,11 @@ final class PlansViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            goals = try await api.listGoals()
-            pendingRevisions = (try? await api.pendingRevisions()) ?? []
+            async let goalsRequest = api.listGoals()
+            async let revisionsRequest = api.pendingRevisions()
+
+            goals = try await goalsRequest
+            pendingRevisions = (try? await revisionsRequest) ?? []
             store.cacheGoals(goals)
             isOffline = false
             errorMessage = nil
@@ -162,7 +165,7 @@ private struct GoalRow: View {
 
     var body: some View {
         Card {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 13) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(goal.title)
@@ -173,10 +176,14 @@ private struct GoalRow: View {
                             .foregroundStyle(Theme.muted)
                     }
                     Spacer()
-                    Text("\(goal.progress.pct)%")
-                        .font(Theme.mono(13, weight: .semibold))
-                        .foregroundStyle(Theme.accent)
+                    VStack(alignment: .trailing, spacing: 5) {
+                        Text("\(goal.progress.pct)%")
+                            .font(Theme.mono(13, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
                 }
+
+                PlanStarsRow(progress: goal.sessionStarProgress, compact: true)
 
                 ProgressView(value: Double(goal.progress.pct), total: 100)
                     .tint(Theme.accent)
@@ -191,6 +198,47 @@ private struct GoalRow: View {
                 .font(Theme.mono(12))
                 .foregroundStyle(Theme.muted)
             }
+        }
+    }
+}
+
+private struct PlanStarsRow: View {
+    let progress: PlanStarProgress
+    var compact = false
+
+    private var visibleStarCount: Int {
+        min(max(progress.total, 1), compact ? 6 : 10)
+    }
+
+    var body: some View {
+        HStack(spacing: 9) {
+            HStack(spacing: compact ? 3 : 4) {
+                ForEach(0..<visibleStarCount, id: \.self) { index in
+                    Image(systemName: index < progress.collected ? "star.fill" : "star")
+                        .font(.system(size: compact ? 12 : 14, weight: .semibold))
+                        .foregroundStyle(index < progress.collected ? Theme.prioMed : Theme.faint.opacity(0.72))
+                }
+
+                if progress.total > visibleStarCount {
+                    Text("+\(progress.total - visibleStarCount)")
+                        .font(Theme.mono(10, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+
+            Text(progress.isComplete ? "Complete" : progress.displayText)
+                .font(Theme.mono(compact ? 10.5 : 11.5, weight: .semibold))
+                .foregroundStyle(progress.isComplete ? Theme.prioLow : Theme.prioMed)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, compact ? 10 : 12)
+        .padding(.vertical, compact ? 8 : 10)
+        .background(Theme.surface2.opacity(0.78))
+        .clipShape(.rect(cornerRadius: 13))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13)
+                .strokeBorder((progress.isComplete ? Theme.prioLow : Theme.prioMed).opacity(0.18), lineWidth: 1)
         }
     }
 }
