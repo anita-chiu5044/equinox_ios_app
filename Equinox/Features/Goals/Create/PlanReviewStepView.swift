@@ -153,7 +153,7 @@ struct SessionEditSheet: View {
                 }
             }
             .navigationTitle("Edit Session")
-            .navigationBarTitleDisplayMode(.inline)
+            .platformInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {

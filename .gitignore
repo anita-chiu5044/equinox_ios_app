@@ -29,6 +29,10 @@ Podfile.lock
 .Spotlight-V100
 .Trashes
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Secrets
 *.p8
 *.p12

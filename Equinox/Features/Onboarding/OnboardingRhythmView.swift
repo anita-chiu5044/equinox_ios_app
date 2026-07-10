@@ -61,18 +61,9 @@ struct OnboardingRhythmView: View {
                 // Productivity card
                 VStack(alignment: .leading, spacing: 20) {
                     // Dynamic sentence
-                    Text("I'm usually productive from ")
+                    Text("I'm usually productive from \(Text(formatHour(startHour)).foregroundStyle(Theme.accent)) to \(Text(formatHour(endHour)).foregroundStyle(Theme.accent))")
                         .font(Theme.serif(17).italic())
                         .foregroundStyle(Theme.inkSoft)
-                    + Text(formatHour(startHour))
-                        .font(Theme.serif(17).italic())
-                        .foregroundStyle(Theme.accent)
-                    + Text(" to ")
-                        .font(Theme.serif(17).italic())
-                        .foregroundStyle(Theme.inkSoft)
-                    + Text(formatHour(endHour))
-                        .font(Theme.serif(17).italic())
-                        .foregroundStyle(Theme.accent)
 
                     // Range Slider
                     RangeSlider(startValue: $startHour, endValue: $endHour,

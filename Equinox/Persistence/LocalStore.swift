@@ -92,6 +92,32 @@ final class LocalStore {
         fetchGoal(id)?.toDTO(phases: cachedPhases(goalID: id))
     }
 
+    func removeGoal(id: String) {
+        guard let context else {
+            return
+        }
+
+        if let goal = fetchGoal(id) {
+            context.delete(goal)
+        }
+
+        let phaseDescriptor = FetchDescriptor<CachedPhase>(
+            predicate: #Predicate { $0.goalId == id }
+        )
+        for phase in (try? context.fetch(phaseDescriptor)) ?? [] {
+            context.delete(phase)
+        }
+
+        let sessionDescriptor = FetchDescriptor<CachedSession>(
+            predicate: #Predicate { $0.goalId == id }
+        )
+        for session in (try? context.fetch(sessionDescriptor)) ?? [] {
+            context.delete(session)
+        }
+
+        save()
+    }
+
     private func fetchGoal(_ id: String) -> CachedGoal? {
         guard let context else {
             return nil

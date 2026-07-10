@@ -4,11 +4,13 @@ struct SettingsDTO: Codable, Equatable {
     let suggestionsEnabled: Bool
     let dailyCheckinEnabled: Bool
     let suggestionMode: String
+    let showCalendarEventTitles: Bool
 
     enum CodingKeys: String, CodingKey {
         case suggestionsEnabled = "suggestions_enabled"
         case dailyCheckinEnabled = "daily_checkin_enabled"
         case suggestionMode = "suggestion_mode"
+        case showCalendarEventTitles = "show_calendar_event_titles"
     }
 }
 
@@ -16,11 +18,13 @@ struct SettingsUpdateRequest: Encodable {
     let suggestionsEnabled: Bool?
     let dailyCheckinEnabled: Bool?
     let suggestionMode: String?
+    let showCalendarEventTitles: Bool?
 
     enum CodingKeys: String, CodingKey {
         case suggestionsEnabled = "suggestions_enabled"
         case dailyCheckinEnabled = "daily_checkin_enabled"
         case suggestionMode = "suggestion_mode"
+        case showCalendarEventTitles = "show_calendar_event_titles"
     }
 }
 

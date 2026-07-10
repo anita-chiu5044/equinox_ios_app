@@ -107,7 +107,7 @@ struct GoalInputStepView: View {
                                 Text(material.name)
                                     .font(Theme.sans(14, weight: .semibold))
                                     .foregroundStyle(Theme.ink)
-                                    .lineLimit(1)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Text(ByteCountFormatter.string(
                                     fromByteCount: Int64(material.sizeBytes),
                                     countStyle: .file

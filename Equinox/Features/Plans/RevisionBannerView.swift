@@ -18,7 +18,7 @@ struct RevisionBannerView: View {
                     Text(triggerLabel)
                         .font(Theme.sans(12))
                         .foregroundStyle(Theme.amberText.opacity(0.8))
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer()

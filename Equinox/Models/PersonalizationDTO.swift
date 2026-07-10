@@ -5,6 +5,8 @@ struct HealthDailyRequest: Codable {
     let sleepHours: Double?
     let steps: Int?
     let workoutMinutes: Int?
+    let cyclePhase: String?
+    let cycleImpact: String?
     let source: String
 
     enum CodingKeys: String, CodingKey {
@@ -12,6 +14,8 @@ struct HealthDailyRequest: Codable {
         case sleepHours = "sleep_hours"
         case steps
         case workoutMinutes = "workout_minutes"
+        case cyclePhase = "cycle_phase"
+        case cycleImpact = "cycle_impact"
     }
 }
 
@@ -22,6 +26,7 @@ struct CapacityDTO: Codable, Equatable {
     let activityScore: Int?
     let fatigueScore: Int?
     let completionScore: Int?
+    let cycleScore: Int?
 
     enum CodingKeys: String, CodingKey {
         case date, dcs
@@ -29,6 +34,7 @@ struct CapacityDTO: Codable, Equatable {
         case activityScore = "activity_score"
         case fatigueScore = "fatigue_score"
         case completionScore = "completion_score"
+        case cycleScore = "cycle_score"
     }
 }
 

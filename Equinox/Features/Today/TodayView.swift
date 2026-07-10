@@ -27,6 +27,21 @@ final class TodayViewModel: ObservableObject {
         self.health = health ?? .shared
     }
 
+    static func statusAdvice(for energy: String) -> String {
+        switch energy {
+        case "great":
+            "Great energy today. Put the most demanding session near the front while focus is available."
+        case "ok":
+            "Steady energy today. Keep the plan realistic and protect one clear next step."
+        case "tired":
+            "Low energy today. Shorten the hardest block and leave room to recover."
+        case "drained":
+            "Protect recovery today. Choose a lighter task or move the hardest session forward."
+        default:
+            "Use your energy as a guide, then let Equinox shape today's plan around your actual capacity."
+        }
+    }
+
     /// Ask HealthKit for a sleep-based energy suggestion (only useful while
     /// today's check-in hasn't been answered yet).
     func loadHealthSuggestion() async {
@@ -41,7 +56,9 @@ final class TodayViewModel: ObservableObject {
         do {
             try await api.syncHealth(
                 sleepHours: snapshot.lastNightSleepHours,
-                steps: snapshot.todaySteps
+                steps: snapshot.todaySteps,
+                cyclePhase: snapshot.cyclePhase,
+                cycleImpact: snapshot.cycleImpact
             )
             capacity = try await api.todayCapacity()
         } catch {
@@ -272,7 +289,7 @@ struct TodayView: View {
                 .padding(20)
             }
             .background(Theme.paper)
-            .toolbar(.hidden, for: .navigationBar)
+            .platformHideNavigationBarToolbar()
             .task {
                 await viewModel.load()
                 await viewModel.loadHealthSuggestion()
@@ -346,32 +363,31 @@ struct TodayView: View {
     // MARK: Greeting (design: mono date over serif greeting)
 
     private var greetingHeader: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
                 Text(Date.now.formatted(.dateTime.weekday(.abbreviated).month(.wide).day()).uppercased())
                     .font(Theme.mono(11, weight: .semibold))
                     .foregroundStyle(Theme.accent)
                     .kerning(1.0)
 
-                Text("\(greeting), \(appState.user?.name ?? "there")")
-                    .font(Theme.serif(28, weight: .semibold))
-                    .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                Spacer(minLength: 8)
 
-                Text(summaryLine)
-                    .font(Theme.sans(13))
-                    .foregroundStyle(Theme.muted)
-            }
-
-            Spacer(minLength: 8)
-
-            if growthCompanionEnabled, let growth = viewModel.growth {
-                EggStatusPill(growth: growth) {
-                    showingNest = true
+                if growthCompanionEnabled, let growth = viewModel.growth {
+                    EggStatusPill(growth: growth) {
+                        showingNest = true
+                    }
                 }
-                .padding(.top, 2)
             }
+
+            Text("\(greeting), \(appState.user?.name ?? "there")")
+                .font(Theme.serif(28, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(summaryLine)
+                .font(Theme.sans(13))
+                .foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.top, 12)
         .accessibilityElement(children: .combine)
@@ -558,8 +574,8 @@ struct TodayView: View {
                         Text(suggestion.reason)
                             .font(Theme.sans(12))
                             .foregroundStyle(Theme.muted)
-                            .lineLimit(2)
                             .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Spacer()
@@ -596,7 +612,7 @@ struct TodayView: View {
                     Text("Tap to see what changed and confirm the new schedule.")
                         .font(Theme.sans(12))
                         .foregroundStyle(Theme.muted)
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
@@ -626,20 +642,24 @@ struct TodayView: View {
         let isOverdue = session.status == "overdue"
 
         return HStack(alignment: .top, spacing: 11) {
-            // Time gutter — fixed 42 pt, right-aligned mono times
+            // Time gutter — wide enough for localized AM/PM without wrapping.
             VStack(alignment: .trailing, spacing: 2) {
                 if let start = session.scheduledStart {
                     Text(start.timeDisplay)
                         .font(Theme.mono(11))
                         .foregroundStyle(Theme.inkSoft)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
                 }
                 if let end = session.scheduledEnd {
                     Text(end.timeDisplay)
                         .font(Theme.mono(10))
                         .foregroundStyle(Theme.faint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
                 }
             }
-            .frame(width: 42, alignment: .trailing)
+            .frame(width: 54, alignment: .trailing)
             .padding(.top, 14)
 
             // Rail: dot + vertical connector line
@@ -667,7 +687,8 @@ struct TodayView: View {
                         .font(Theme.sans(14.5, weight: .semibold))
                         .foregroundStyle(Theme.ink)
                         .strikethrough(isDone, color: Theme.faint)
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
 
                     HStack(spacing: 8) {
                         PriorityPill(priority: session.priority)
@@ -685,8 +706,9 @@ struct TodayView: View {
                         }
                     }
                 }
+                .layoutPriority(1)
 
-                Spacer()
+                Spacer(minLength: 8)
 
                 Button {
                     completingSession = session

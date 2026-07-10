@@ -254,9 +254,11 @@ extension GoogleOAuthService: ASWebAuthenticationPresentationContextProviding {
             if let windowScene = (UIApplication.shared.connectedScenes
                 .first(where: { $0.activationState == .foregroundActive })
                 ?? UIApplication.shared.connectedScenes.first) as? UIWindowScene {
-                return ASPresentationAnchor(windowScene: windowScene)
+                return windowScene.keyWindow
+                    ?? windowScene.windows.first
+                    ?? ASPresentationAnchor(windowScene: windowScene)
             }
-            return ASPresentationAnchor()
+            preconditionFailure("Google OAuth requires an active window scene.")
             #else
             NSApplication.shared.keyWindow ?? ASPresentationAnchor()
             #endif

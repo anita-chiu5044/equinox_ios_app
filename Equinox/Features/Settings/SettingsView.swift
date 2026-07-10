@@ -32,14 +32,16 @@ final class SettingsViewModel: ObservableObject {
     func updateSettings(
         suggestionsEnabled: Bool? = nil,
         dailyCheckinEnabled: Bool? = nil,
-        suggestionMode: String? = nil
+        suggestionMode: String? = nil,
+        showCalendarEventTitles: Bool? = nil
     ) async {
         do {
             settings = try await api.updateSettings(
                 SettingsUpdateRequest(
                     suggestionsEnabled: suggestionsEnabled,
                     dailyCheckinEnabled: dailyCheckinEnabled,
-                    suggestionMode: suggestionMode
+                    suggestionMode: suggestionMode,
+                    showCalendarEventTitles: showCalendarEventTitles
                 )
             )
             errorMessage = nil
@@ -92,6 +94,10 @@ struct SettingsView: View {
     @State private var showStorageInfo = false
     @State private var assertivenessIndex: Int = 1
     @State private var seededSleep = false
+    @State private var calendarConnectionUpdating = false
+    @State private var showingNameEditor = false
+    @State private var draftName = ""
+    @State private var savingName = false
 
     private let assertivenessModes = ["gentle", "balanced", "assertive"]
     private let assertivenessDescriptions = [
@@ -124,17 +130,15 @@ struct SettingsView: View {
                         HStack(spacing: 14) {
                             ZStack {
                                 Circle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [Theme.accentSoft, Theme.accent],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
+                                    .fill(Theme.accentWash)
                                     .frame(width: 52, height: 52)
+                                    .overlay {
+                                        Circle()
+                                            .strokeBorder(Theme.accentRing, lineWidth: 1)
+                                    }
                                 Text(String(appState.user?.name?.prefix(1) ?? "?"))
                                     .font(Theme.serif(22, weight: .semibold))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(Theme.ink)
                             }
 
                             VStack(alignment: .leading, spacing: 2) {
@@ -148,7 +152,10 @@ struct SettingsView: View {
 
                             Spacer()
 
-                            Button("Edit") {}
+                            Button("Edit") {
+                                draftName = appState.user?.name ?? ""
+                                showingNameEditor = true
+                            }
                                 .font(Theme.sans(14, weight: .semibold))
                                 .foregroundStyle(Theme.accent)
                                 .padding(.horizontal, 13)
@@ -198,38 +205,44 @@ struct SettingsView: View {
                                     .foregroundStyle(Theme.muted)
                             }
                             Spacer()
-                            Text(gcConnected ? "Connected" : "Disconnected")
-                                .font(Theme.mono(11, weight: .semibold))
-                                .foregroundStyle(gcConnected ? Theme.prioLow : Theme.muted)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(gcConnected ? Theme.prioLow.opacity(0.12) : Theme.bgWarm)
-                                .cornerRadius(8)
+                            Button {
+                                updateGoogleCalendarConnection(!gcConnected)
+                            } label: {
+                                Text(calendarConnectionUpdating ? "Updating" : (gcConnected ? "Connected" : "Disconnected"))
+                                    .font(Theme.mono(11, weight: .semibold))
+                                    .foregroundStyle(gcConnected ? Theme.prioLow : Theme.muted)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.78)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(gcConnected ? Theme.prioLow.opacity(0.12) : Theme.bgWarm)
+                                    .cornerRadius(8)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(calendarConnectionUpdating)
+                            .accessibilityLabel(gcConnected ? "Disconnect Google Calendar" : "Connect Google Calendar")
                         }
                         .padding(.vertical, 6)
 
                         if gcConnected {
                             Divider().padding(.leading, 16)
-                            Button {
-                                Task { await viewModel.setGoogleCalendarConnected(false) }
-                            } label: {
-                                Text("Disconnect Google Calendar")
-                                    .font(Theme.sans(14))
-                                    .foregroundStyle(Color.red.opacity(0.75))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 6)
+                            Toggle(isOn: Binding(
+                                get: { viewModel.settings?.showCalendarEventTitles ?? false },
+                                set: { value in
+                                    Task { await viewModel.updateSettings(showCalendarEventTitles: value) }
+                                }
+                            )) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Show calendar event names")
+                                        .font(Theme.sans(14))
+                                        .foregroundStyle(Theme.ink)
+                                    Text("Display Google event titles in schedule previews")
+                                        .font(Theme.sans(12))
+                                        .foregroundStyle(Theme.muted)
+                                }
                             }
-                        } else {
-                            Divider().padding(.leading, 16)
-                            Button {
-                                Task { await viewModel.setGoogleCalendarConnected(true) }
-                            } label: {
-                                Text("Connect Google Calendar")
-                                    .font(Theme.sans(14))
-                                    .foregroundStyle(Theme.accent)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 6)
-                            }
+                            .tint(Theme.accent)
+                            .padding(.vertical, 6)
                         }
 
                         Divider().padding(.leading, 16)
@@ -483,7 +496,7 @@ struct SettingsView: View {
                 .padding(20)
             }
             .background(Theme.bg)
-            .navigationBarHidden(true)
+            .platformNavigationBarHidden(true)
             .task {
                 await viewModel.load()
             }
@@ -498,6 +511,53 @@ struct SettingsView: View {
             } message: {
                 Text("This will permanently delete your account and all data. This action cannot be undone.")
             }
+            .sheet(isPresented: $showingNameEditor) {
+                NavigationStack {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text("Display name")
+                            .font(Theme.serif(28, weight: .semibold))
+                            .foregroundStyle(Theme.ink)
+
+                        TextField("Your name", text: $draftName)
+                            .font(Theme.sans(16))
+                            .platformWordsAutocapitalization()
+                            .padding(14)
+                            .background(Theme.surface)
+                            .clipShape(.rect(cornerRadius: 12))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(Theme.line, lineWidth: 1)
+                            }
+
+                        Text("This is shown in greetings and progress cards.")
+                            .font(Theme.sans(13))
+                            .foregroundStyle(Theme.muted)
+
+                        Spacer()
+
+                        PrimaryButton("Save name", systemImage: "checkmark", isLoading: savingName) {
+                            Task {
+                                savingName = true
+                                let success = await appState.updateDisplayName(draftName)
+                                savingName = false
+                                if success {
+                                    showingNameEditor = false
+                                }
+                            }
+                        }
+                    }
+                    .padding(20)
+                    .background(Theme.bg)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") {
+                                showingNameEditor = false
+                            }
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+            }
         }
     }
 
@@ -508,6 +568,16 @@ struct SettingsView: View {
             return "\(h):00\(suffix)"
         }
         return "\(fmt(productiveStart)) – \(fmt(productiveEnd))"
+    }
+
+    private func updateGoogleCalendarConnection(_ connected: Bool) {
+        guard !calendarConnectionUpdating else { return }
+
+        Task {
+            calendarConnectionUpdating = true
+            await viewModel.setGoogleCalendarConnected(connected)
+            calendarConnectionUpdating = false
+        }
     }
 }
 
@@ -577,7 +647,8 @@ private struct SettingsRow: View {
                     Text(value)
                         .font(Theme.mono(12))
                         .foregroundStyle(Theme.muted)
-                        .lineLimit(1)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if action != nil {
                     Image(systemName: "chevron.right")

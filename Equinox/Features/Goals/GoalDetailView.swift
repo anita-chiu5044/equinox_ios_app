@@ -8,7 +8,7 @@ final class GoalDetailViewModel: ObservableObject {
     @Published var pendingSuggestion: SuggestionDTO?
     @Published var isLoading = false
     @Published var isRechecking = false
-    @Published var recheckSummary: RecheckChangeSummary?
+    @Published var recheckRevision: PlanRevisionDTO?
     @Published var errorMessage: String?
 
     @Published var isOffline = false
@@ -149,7 +149,7 @@ final class GoalDetailViewModel: ObservableObject {
                 }
             }
 
-            let updated = try await api.replanGoal(
+            let revision = try await api.replanGoal(
                 id: goalID,
                 request: ReplanGoalRequest(
                     instructions: instructions,
@@ -159,17 +159,7 @@ final class GoalDetailViewModel: ObservableObject {
                     source: source
                 )
             )
-            goal = updated
-            store.cacheGoal(updated)
-            schedule = try await api.scheduleGoal(id: goalID)
-            await load()
-            recheckSummary = RecheckChangeSummary.make(
-                before: previousGoal,
-                after: updated,
-                source: source == "apple_intelligence" ? "Apple Intelligence" : "Equinox Cloud",
-                targetMinutes: targetSessionMinutes,
-                preserveCompleted: preserveCompleted
-            )
+            recheckRevision = revision
             errorMessage = nil
             return true
         } catch {
@@ -186,6 +176,21 @@ final class GoalDetailViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
     }
+
+    func deleteGoal() async -> Bool {
+        do {
+            try await api.deleteGoal(id: goalID)
+            store.removeGoal(id: goalID)
+            goal = nil
+            schedule = nil
+            pendingSuggestion = nil
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
 }
 
 struct GoalDetailView: View {
@@ -199,11 +204,16 @@ struct GoalDetailView: View {
 
     @StateObject private var viewModel: GoalDetailViewModel
     @State private var showingRecheck = false
+    @State private var showingDeletePlanAlert = false
+    @State private var isDeletingPlan = false
     @State private var completionPresentation: GoalDetailCompletionPresentation?
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    private let onDeleted: (() -> Void)?
 
-    init(goalID: String) {
+    init(goalID: String, onDeleted: (() -> Void)? = nil) {
         _viewModel = StateObject(wrappedValue: GoalDetailViewModel(goalID: goalID))
+        self.onDeleted = onDeleted
     }
 
     var body: some View {
@@ -215,10 +225,6 @@ struct GoalDetailView: View {
 
                 if let error = viewModel.errorMessage {
                     InlineErrorView(message: error)
-                }
-
-                if let summary = viewModel.recheckSummary {
-                    recheckResult(summary)
                 }
 
                 if viewModel.isLoading && viewModel.goal == nil {
@@ -282,9 +288,34 @@ struct GoalDetailView: View {
                 } label: {
                     Label("Recheck schedule with AI", systemImage: "sparkles")
                 }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    showingDeletePlanAlert = true
+                } label: {
+                    Label("Delete plan", systemImage: "trash")
+                }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
+        }
+        .alert("Delete plan?", isPresented: $showingDeletePlanAlert) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    isDeletingPlan = true
+                    let deleted = await viewModel.deleteGoal()
+                    isDeletingPlan = false
+                    if deleted {
+                        onDeleted?()
+                        dismiss()
+                    }
+                }
+            }
+            .disabled(isDeletingPlan)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the plan and its sessions from Equinox. This cannot be undone.")
         }
         .task {
             await viewModel.load()
@@ -317,6 +348,15 @@ struct GoalDetailView: View {
                     completionPresentation = nil
                 }
             )
+        }
+        .sheet(item: $viewModel.recheckRevision) { revision in
+            RevisionDiffView(revision: revision) {
+                Task {
+                    viewModel.recheckRevision = nil
+                    await viewModel.load()
+                    await viewModel.scheduleGoal()
+                }
+            }
         }
         .refreshable {
             await viewModel.load()
@@ -699,7 +739,7 @@ private struct RecheckPlanSheet: View {
                 }
             }
             .navigationTitle("AI schedule recheck")
-            .navigationBarTitleDisplayMode(.inline)
+            .platformInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -741,7 +781,7 @@ private struct MaterialTile: View {
             Text(material.name)
                 .font(Theme.sans(12, weight: .semibold))
                 .foregroundStyle(Theme.ink)
-                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(width: 90, alignment: .leading)
 
             Text(ByteCountFormatter.string(

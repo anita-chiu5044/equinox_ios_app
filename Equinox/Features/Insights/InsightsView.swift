@@ -156,7 +156,7 @@ struct InsightsView: View {
                 .padding(20)
             }
             .background(Theme.paper)
-            .navigationTitle("Insights")
+            .platformHideNavigationBarToolbar()
             .task {
                 await viewModel.load()
             }
@@ -295,11 +295,15 @@ struct InsightsView: View {
                     .font(Theme.sans(13))
                     .foregroundStyle(Theme.inkSoft)
 
-                HStack(spacing: 12) {
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
+                    spacing: 10
+                ) {
                     capacityMetric("Sleep", capacity.sleepScore)
                     capacityMetric("Activity", capacity.activityScore)
                     capacityMetric("Fatigue", capacity.fatigueScore)
                     capacityMetric("Completion", capacity.completionScore)
+                    capacityMetric("Cycle", capacity.cycleScore)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

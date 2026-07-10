@@ -397,8 +397,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				EQUINOX_API_BASE_URL = "http://qiuyixins-MacBook-Air.local:8000";
 				GENERATE_INFOPLIST_FILE = NO;
-				GOOGLE_IOS_CLIENT_ID = "";
-				GOOGLE_OAUTH_REDIRECT_SCHEME = "";
+				GOOGLE_IOS_CLIENT_ID = "1066207357136-irlq1mmf1futfn5s8pc70gek6sd5pfpa.apps.googleusercontent.com";
+				GOOGLE_OAUTH_REDIRECT_SCHEME = "com.googleusercontent.apps.1066207357136-irlq1mmf1futfn5s8pc70gek6sd5pfpa";
 				INFOPLIST_FILE = "Config/Equinox-Info.plist";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -443,10 +443,10 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				EQUINOX_API_BASE_URL = "https://equinox-api-xxxxx.asia-east1.run.app";
+				EQUINOX_API_BASE_URL = "https://equinox-api-cvs7spxauq-de.a.run.app";
 				GENERATE_INFOPLIST_FILE = NO;
-				GOOGLE_IOS_CLIENT_ID = "";
-				GOOGLE_OAUTH_REDIRECT_SCHEME = "";
+				GOOGLE_IOS_CLIENT_ID = "1066207357136-irlq1mmf1futfn5s8pc70gek6sd5pfpa.apps.googleusercontent.com";
+				GOOGLE_OAUTH_REDIRECT_SCHEME = "com.googleusercontent.apps.1066207357136-irlq1mmf1futfn5s8pc70gek6sd5pfpa";
 				INFOPLIST_FILE = "Config/Equinox-Info.plist";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;

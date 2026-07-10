@@ -97,7 +97,7 @@ struct RevisionDiffView: View {
                         .foregroundStyle(Theme.muted)
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
+            .platformInlineNavigationTitle()
         }
         .onChange(of: vm.appliedSuccessfully) { _, applied in
             if applied {

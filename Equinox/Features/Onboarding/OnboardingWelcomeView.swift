@@ -87,6 +87,18 @@ struct OnboardingWelcomeView: View {
                     .shadow(color: Theme.ink.opacity(0.06), radius: 6, x: 0, y: 2)
                     .accessibilityLabel("Sign in with Google")
 
+                    #if DEBUG
+                    PrimaryButton(
+                        "Development Sign In",
+                        systemImage: "bolt.fill",
+                        isLoading: appState.authStatus == .signingIn
+                    ) {
+                        Task {
+                            await appState.signInForDevelopment()
+                        }
+                    }
+                    #endif
+
                     // Authorization text
                     Text("By continuing you agree to our Terms & Privacy.")
                         .font(Theme.mono(11))

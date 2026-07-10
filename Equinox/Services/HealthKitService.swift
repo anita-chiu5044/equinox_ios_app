@@ -20,6 +20,8 @@ final class HealthKitService {
         let lastNightSleepHours: Double?
         let sevenDaySleepAverage: Double?
         let todaySteps: Int?
+        let cyclePhase: String?
+        let cycleImpact: String?
         let status: String
         let recommendation: String
     }
@@ -43,10 +45,13 @@ final class HealthKitService {
         guard isAvailable else {
             return false
         }
-        let types: Set<HKObjectType> = [
+        var types: Set<HKObjectType> = [
             HKCategoryType(.sleepAnalysis),
             HKQuantityType(.stepCount),
         ]
+        if let menstrualFlow = HKObjectType.categoryType(forIdentifier: .menstrualFlow) {
+            types.insert(menstrualFlow)
+        }
         do {
             try await store.requestAuthorization(toShare: [], read: types)
             return true
@@ -78,21 +83,27 @@ final class HealthKitService {
         async let lastNight = lastNightSleepHours()
         async let average = recentSleepAverage()
         async let steps = todayStepCount()
+        async let cycle = todayCycleSignal()
+        let cycleSignal = await cycle
         return Self.analyze(
             lastNightSleepHours: await lastNight,
             sevenDaySleepAverage: await average,
-            todaySteps: await steps
+            todaySteps: await steps,
+            cyclePhase: cycleSignal.phase,
+            cycleImpact: cycleSignal.impact
         )
     }
 
     static func analyze(
         lastNightSleepHours: Double?,
         sevenDaySleepAverage: Double?,
-        todaySteps: Int?
+        todaySteps: Int?,
+        cyclePhase: String? = nil,
+        cycleImpact: String? = nil
     ) -> HealthSnapshot {
         let sleep = lastNightSleepHours ?? sevenDaySleepAverage
-        let status: String
-        let recommendation: String
+        var status: String
+        var recommendation: String
 
         switch sleep {
         case .some(let hours) where hours < 6:
@@ -109,10 +120,19 @@ final class HealthKitService {
             recommendation = "Recent sleep and step data will make this analysis more personal."
         }
 
+        if cycleImpact == "heavy" || cycleImpact == "medium" {
+            status = "Recovery window"
+            recommendation = "Cycle data suggests a gentler load today. Equinox will lower capacity slightly before scheduling."
+        } else if cyclePhase == "period" {
+            recommendation = "Cycle data is included today, so the plan can stay lighter if your body needs it."
+        }
+
         return HealthSnapshot(
             lastNightSleepHours: lastNightSleepHours,
             sevenDaySleepAverage: sevenDaySleepAverage,
             todaySteps: todaySteps,
+            cyclePhase: cyclePhase,
+            cycleImpact: cycleImpact,
             status: status,
             recommendation: recommendation
         )
@@ -308,8 +328,46 @@ final class HealthKitService {
         #endif
     }
 
+    func todayCycleSignal() async -> (phase: String?, impact: String?) {
+        #if canImport(HealthKit)
+        guard isAvailable,
+              let type = HKObjectType.categoryType(forIdentifier: .menstrualFlow) else {
+            return (nil, nil)
+        }
+        let start = Calendar.current.startOfDay(for: .now)
+        guard let end = Calendar.current.date(byAdding: .day, value: 1, to: start) else {
+            return (nil, nil)
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.categorySample(type: type, predicate: predicate)],
+            sortDescriptors: []
+        )
+        guard let samples = try? await descriptor.result(for: store),
+              !samples.isEmpty else {
+            return (nil, nil)
+        }
+        return ("period", Self.menstrualImpact(from: samples.map(\.value)))
+        #else
+        return (nil, nil)
+        #endif
+    }
+
 
     #if canImport(HealthKit)
+    private static func menstrualImpact(from values: [Int]) -> String {
+        if values.contains(HKCategoryValueMenstrualFlow.heavy.rawValue) {
+            return "heavy"
+        }
+        if values.contains(HKCategoryValueMenstrualFlow.medium.rawValue) {
+            return "medium"
+        }
+        if values.contains(HKCategoryValueMenstrualFlow.light.rawValue) {
+            return "light"
+        }
+        return "medium"
+    }
+
     private func samples(
         type: HKSampleType,
         predicate: NSPredicate

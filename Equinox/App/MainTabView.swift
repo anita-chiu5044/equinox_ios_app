@@ -1,9 +1,13 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct MainTabView: View {
     @State private var selectedTab = 0
 
     init() {
+        #if canImport(UIKit)
         // Tab bar: warm paper background, accent tint for active items
         let appearance = UITabBarAppearance()
         appearance.configureWithOpaqueBackground()
@@ -20,6 +24,7 @@ struct MainTabView: View {
 
         UITabBar.appearance().standardAppearance = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
+        #endif
     }
 
     var body: some View {

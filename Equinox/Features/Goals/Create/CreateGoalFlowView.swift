@@ -253,7 +253,7 @@ struct CreateGoalFlowView: View {
             }
             .background(Theme.paper)
             .navigationTitle(navigationTitle)
-            .navigationBarTitleDisplayMode(.inline)
+            .platformInlineNavigationTitle()
             .toolbar {
                 if viewModel.step == .input {
                     ToolbarItem(placement: .cancellationAction) {

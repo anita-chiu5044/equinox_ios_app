@@ -140,6 +140,17 @@ final class AppState: ObservableObject {
         authError = nil
     }
 
+    func updateDisplayName(_ name: String) async -> Bool {
+        do {
+            user = try await api.updateMe(name: name)
+            authError = nil
+            return true
+        } catch {
+            authError = error.localizedDescription
+            return false
+        }
+    }
+
     func deleteAccount() async {
         do {
             try await api.deleteMe()

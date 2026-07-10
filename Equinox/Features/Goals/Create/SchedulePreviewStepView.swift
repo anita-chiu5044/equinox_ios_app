@@ -188,7 +188,7 @@ struct SchedulePreviewStepView: View {
                         Text(item.label)
                             .font(Theme.sans(13, weight: .semibold))
                             .foregroundStyle(.white)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer()
                         Text("\(item.start)–\(item.end)")
                             .font(Theme.mono(11, weight: .semibold))

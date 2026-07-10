@@ -11,6 +11,11 @@ if [[ -z "${API_URL}" ]]; then
   exit 1
 fi
 
+if [[ "${CONFIGURATION}" == "Release" && ! "${API_URL}" =~ ^https:// ]]; then
+  echo "Release API URL must start with https:// for TestFlight/App Store builds." >&2
+  exit 1
+fi
+
 xcodebuild \
   -project Equinox.xcodeproj \
   -scheme Equinox \

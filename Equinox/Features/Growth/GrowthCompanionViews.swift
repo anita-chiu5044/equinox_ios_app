@@ -7,12 +7,8 @@ struct EggStatusPill: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                OrbitEggView(
-                    progress: growth.progress,
-                    targetProgress: growth.targetProgress,
-                    isHatched: growth.isHatched
-                )
-                .frame(width: 34, height: 42)
+                OrbEggAssetView(cornerRadius: 10)
+                    .frame(width: 42, height: 42)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(growth.isHatched ? "Orb hatched" : growth.progressText)
@@ -21,7 +17,7 @@ struct EggStatusPill: View {
                     Text(growth.goalTitle)
                         .font(Theme.sans(10.5))
                         .foregroundStyle(Theme.muted)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.horizontal, 10)
@@ -60,11 +56,11 @@ struct GrowthCompanionCard: View {
                         .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 5) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 6) {
                             Text(title)
                                 .font(Theme.sans(15, weight: .semibold))
                                 .foregroundStyle(Theme.ink)
-                                .lineLimit(1)
+                                .fixedSize(horizontal: false, vertical: true)
 
                             if let growth {
                                 Text(growth.progressText)
@@ -109,7 +105,7 @@ struct GrowthCompanionCard: View {
                         Text(nextStepText)
                             .font(Theme.sans(12.5, weight: .semibold))
                             .foregroundStyle(Theme.inkSoft)
-                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 11)
@@ -205,14 +201,20 @@ struct GrowthCompanionCard: View {
                 .scaledToFit()
                 .frame(width: 78, height: 78)
         case .egg:
-            if let growth {
-                OrbitEggView(
-                    progress: growth.progress,
-                    targetProgress: growth.targetProgress,
-                    isHatched: false
-                )
-                .frame(width: 48, height: 62)
-            }
+            OrbEggAssetView(cornerRadius: 18)
+                .frame(width: 82, height: 82)
+                .overlay(alignment: .bottomTrailing) {
+                    if let growth {
+                        Text(growth.progressText)
+                            .font(Theme.mono(8, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 3)
+                            .background(Theme.surface.opacity(0.86))
+                            .clipShape(.capsule)
+                            .offset(x: -3, y: -3)
+                    }
+                }
         case .idle:
             Image("OrbIdle")
                 .resizable()
@@ -369,12 +371,9 @@ struct NestSheet: View {
                                     .frame(width: 150, height: 150)
                                     .shadow(color: Theme.shadowInk.opacity(0.16), radius: 16, y: 8)
                             } else {
-                                OrbitEggView(
-                                    progress: growth.progress,
-                                    targetProgress: growth.targetProgress,
-                                    isHatched: false
-                                )
-                                .frame(width: 110, height: 136)
+                                OrbEggAssetView(cornerRadius: 26)
+                                    .frame(width: 154, height: 154)
+                                    .shadow(color: Theme.shadowInk.opacity(0.14), radius: 16, y: 8)
                             }
                         }
 
@@ -398,7 +397,7 @@ struct NestSheet: View {
                 .padding(20)
             }
             .background(Theme.paper)
-            .navigationBarTitleDisplayMode(.inline)
+            .platformInlineNavigationTitle()
         }
         .presentationDetents([.medium, .large])
     }
@@ -452,7 +451,7 @@ struct NestSheet: View {
                                 Text(contribution.displayTitle)
                                     .font(Theme.sans(12.5, weight: .semibold))
                                     .foregroundStyle(Theme.inkSoft)
-                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Text("\(contribution.displayKind) · +\(contribution.points) glow")
                                     .font(Theme.mono(10.5))
                                     .foregroundStyle(Theme.muted)
@@ -482,7 +481,7 @@ struct NestSheet: View {
                         Text(next.title)
                             .font(Theme.sans(12.5))
                             .foregroundStyle(Theme.inkSoft)
-                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text("\(next.minutes) min")
                             .font(Theme.mono(10.5))
                             .foregroundStyle(Theme.muted)
@@ -589,6 +588,17 @@ struct HatchCelebrationOverlay: View {
             .padding(28)
         }
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
+    }
+}
+
+struct OrbEggAssetView: View {
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        Image("OrbEggIdle")
+            .resizable()
+            .scaledToFit()
+            .clipShape(.rect(cornerRadius: cornerRadius))
     }
 }
 

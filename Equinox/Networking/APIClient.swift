@@ -297,6 +297,10 @@ extension APIClient {
         try await send("/me")
     }
 
+    func updateMe(name: String) async throws -> UserDTO {
+        try await send("/me", method: .patch, body: UserUpdateRequest(name: name))
+    }
+
     func todaySessions() async throws -> [SessionDTO] {
         try await send("/sessions/today")
     }
@@ -356,7 +360,7 @@ extension APIClient {
         try await sendNoContent("/goals/\(id)", method: .delete)
     }
 
-    func replanGoal(id: String, request: ReplanGoalRequest) async throws -> GoalDTO {
+    func replanGoal(id: String, request: ReplanGoalRequest) async throws -> PlanRevisionDTO {
         try await send("/goals/\(id)/replan", method: .post, body: request)
     }
 
@@ -443,13 +447,18 @@ extension APIClient {
     func syncHealth(
         sleepHours: Double?,
         steps: Int?,
-        workoutMinutes: Int? = nil
+        workoutMinutes: Int? = nil,
+        cyclePhase: String? = nil,
+        cycleImpact: String? = nil
     ) async throws {
         try await sendNoContent(
             "/health/daily", method: .post,
             body: HealthDailyRequest(
                 date: nil, sleepHours: sleepHours, steps: steps,
-                workoutMinutes: workoutMinutes, source: "healthkit"
+                workoutMinutes: workoutMinutes,
+                cyclePhase: cyclePhase,
+                cycleImpact: cycleImpact,
+                source: "healthkit"
             )
         )
     }
@@ -495,6 +504,10 @@ extension APIClient {
     func deleteMe() async throws {
         try await sendNoContent("/me", method: .delete)
     }
+}
+
+struct UserUpdateRequest: Encodable {
+    let name: String
 }
 
 extension APIClient {

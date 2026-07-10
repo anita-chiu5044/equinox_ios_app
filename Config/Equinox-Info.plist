@@ -46,7 +46,7 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Equinox reads your sleep and activity data to suggest how intense today's study plan should be. Health data never leaves your device.</string>
+	<string>Equinox reads your sleep, activity, and optional cycle data to suggest how intense today's study plan should be. Health data is summarized before syncing.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Equinox writes sample sleep and step data only when you use the developer testing control in a debug build.</string>
 	<key>UILaunchScreen</key>
